@@ -1,0 +1,42 @@
+name: Uptime
+
+# Every 5 minutes, check the three BGDCRE sites. If any is down (after
+# retries), the run fails and GitHub emails the account owner.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check sites
+        run: |
+          UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+          down=()
+          for url in https://proofs.bgdcre.com https://bgdcre.com https://studio.bgdcre.com/admin; do
+            ok=0
+            for attempt in 1 2 3; do
+              code=$(curl -s -o /dev/null -L --max-time 20 -A "$UA" -w "%{http_code}" "$url" || echo 000)
+              if [ "$code" -ge 200 ] && [ "$code" -lt 400 ]; then ok=1; break; fi
+              sleep 20
+            done
+            if [ $ok = 1 ]; then echo "UP   $url ($code)"; else echo "DOWN $url ($code)"; down+=("$url ($code)"); fi
+          done
+          if [ ${#down[@]} -gt 0 ]; then
+            echo "::error::Site down: ${down[*]}"
+            exit 1
+          fi
+
+      # GitHub pauses scheduled workflows after 60 days without repo activity;
+      # re-enabling via the API resets that clock without commits.
+      - name: Keep schedule alive
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/uptime.yml/enable" || true
